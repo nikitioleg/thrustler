@@ -3,6 +3,18 @@ name = "thrustler"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace]
+members = [
+    "crates/vulkan",
+    "crates/winit-window",
+    "crates/engine",
+    "crates/core"]
 
 [dependencies]
+engine = { path = "../thrustler/crates/engine"}
+
+[workspace.dependencies]
+core = { path = "../thrustler/crates/core"}
+vulkan = { path = "../thrustler/crates/vulkan" }
+winit-window = { path = "../thrustler/crates/winit-window" }
+error-stack = "0.4.1"
