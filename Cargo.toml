@@ -18,3 +18,5 @@ core = { path = "../thrustler/crates/core"}
 vulkan = { path = "../thrustler/crates/vulkan" }
 winit-window = { path = "../thrustler/crates/winit-window" }
 error-stack = "0.4.1"
+# Is used to decouple vulkano and winit. A version have to coinside with vulkano version
+raw-window-handle = "0.5.2"

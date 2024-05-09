@@ -8,3 +8,5 @@ edition = "2021"
 [dependencies]
 core.workspace = true
 error-stack.workspace = true
+raw-window-handle.workspace = true
+winit = { version = "0.30.0", features = ["rwh_05"] }

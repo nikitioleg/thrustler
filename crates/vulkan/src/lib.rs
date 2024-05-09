@@ -10,6 +10,6 @@ impl Vulkan {
 
 impl ThrustlerBackend for Vulkan {
     fn init(&mut self) {
-        print!("Vulkan back init");
+        println!("Vulkan back init");
     }
 }

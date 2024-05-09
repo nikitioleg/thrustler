@@ -1,5 +1,5 @@
 use engine::Engine;
 
-fn main() {
-    Engine::new().start()
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    Ok(Engine::new()?.start()?)
 }
