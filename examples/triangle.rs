@@ -1,5 +1,12 @@
-use engine::Engine;
+use engine::{Engine, EngineSettings};
+use engine::Result;
+use engine::ThrustlerError;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    Ok(Engine::new()?.start()?)
+fn main() -> Result<(), ThrustlerError> {
+    Ok(
+        Engine::new_with_settings(
+            EngineSettings::default()
+        )?
+            .start()?,
+    )
 }

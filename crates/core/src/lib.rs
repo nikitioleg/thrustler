@@ -1,4 +1,5 @@
 use error_stack::Result;
+
 use crate::error::ThrustlerError;
 
 pub mod error;
@@ -21,6 +22,12 @@ pub trait ThrustlerBackend {
 pub struct Size {
     pub width: u32,
     pub height: u32,
+}
+
+impl Default for Size {
+    fn default() -> Self {
+        Size::new(800, 600)
+    }
 }
 
 impl Size {

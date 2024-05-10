@@ -6,13 +6,15 @@ use error_stack::Context;
 pub enum ThrustlerError {
     WindowError,
     GraphicalBackendError,
+    EngineError,
 }
 
 impl Display for ThrustlerError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let msg = match self {
             Self::WindowError => "Unable error",
-            Self::GraphicalBackendError => "Graphical backend error"
+            Self::GraphicalBackendError => "Graphical backend error",
+            Self::EngineError => "Engine error"
         };
         write!(f, "{msg}")
     }

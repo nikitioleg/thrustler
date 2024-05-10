@@ -60,7 +60,8 @@ impl VulkanBackend {
 
     pub fn init(&mut self, window: Arc<dyn VulkanWindow>) -> Result<(), ThrustlerError> {
         let toolkit = create_vulkano_toolkit(self.screen_size, window)
-            .change_context(ThrustlerError::GraphicalBackendError)?;
+            .change_context(ThrustlerError::GraphicalBackendError)
+            .attach_printable("Vulkan toolkit initialization error")?;
         self.vulkano_toolkit = Some(toolkit);
         Ok(())
     }
