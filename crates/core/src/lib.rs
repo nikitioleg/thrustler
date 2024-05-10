@@ -1,9 +1,10 @@
-use crate::errors::ThrustlerWindowError;
+use error_stack::Result;
+use crate::error::ThrustlerError;
 
-pub mod errors;
+pub mod error;
 
 pub trait ThrustlerWindow {
-    fn start(&self, dispatcher: Box<dyn FnMut(WindowEvent) -> ()>) -> error_stack::Result<(), ThrustlerWindowError>;
+    fn start(&self, dispatcher: Box<dyn FnMut(WindowEvent) -> ()>) -> Result<(), ThrustlerError>;
 }
 
 pub enum WindowEvent {
@@ -13,7 +14,9 @@ pub enum WindowEvent {
 }
 
 pub trait ThrustlerBackend {
-    fn init(&mut self);
+    type Window;
+    fn init(&mut self, window: Self::Window) -> Result<(), ThrustlerError>;
+    fn test_draw(&mut self);
 }
 
 #[derive(Debug, Copy, Clone)]

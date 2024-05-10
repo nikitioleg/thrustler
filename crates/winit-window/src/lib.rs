@@ -12,7 +12,10 @@ use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use core::{Size, ThrustlerWindow, WindowEvent};
-use core::errors::ThrustlerWindowError;
+use core::error::ThrustlerError;
+use error::ThrustlerWindowError;
+
+mod error;
 
 pub struct WinitWindow {
     window_state: RefCell<WindowState>,
@@ -22,7 +25,7 @@ pub struct WinitWindow {
 impl WinitWindow {
     pub fn new(
         size: Size,
-        window_supplier: Box<dyn Fn(Arc<dyn OutputWindow>) -> ()>,
+        window_supplier: Box<dyn Fn(Arc<dyn OutputWindow>) -> Result<(), ThrustlerError>>,
     ) -> Result<WinitWindow, ThrustlerWindowError> {
         let event_loop = winit::event_loop::EventLoop::new()
             .attach_printable("Can't create event loop")
@@ -59,8 +62,8 @@ impl WinitWindow {
 }
 
 impl ThrustlerWindow for WinitWindow {
-    fn start(&self, dispatcher: Box<dyn FnMut(WindowEvent) -> ()>) -> Result<(), ThrustlerWindowError> {
-        self.run(dispatcher)
+    fn start(&self, dispatcher: Box<dyn FnMut(WindowEvent) -> ()>) -> Result<(), ThrustlerError> {
+        self.run(dispatcher).change_context(ThrustlerError::WindowError)
     }
 }
 
@@ -69,7 +72,7 @@ struct WindowState {
     window_attrs: Option<WindowAttributes>,
     event_loop: Option<winit::event_loop::EventLoop<()>>,
     event_dispatcher: Option<Box<dyn FnMut(WindowEvent) -> ()>>,
-    window_supplier: Box<dyn Fn(Arc<dyn OutputWindow>) -> ()>,
+    window_supplier: Box<dyn Fn(Arc<dyn OutputWindow>) -> Result<(), ThrustlerError>>,
 }
 
 impl WindowState {
@@ -86,7 +89,7 @@ impl ApplicationHandler<()> for WindowState {
         let rc_window = Arc::new(window);
         let trait_object: Arc<dyn OutputWindow> = rc_window.clone() as Arc<dyn OutputWindow>;
 
-        self.window_supplier.as_mut()(trait_object);
+        self.window_supplier.as_mut()(trait_object).expect("Error while window was used for set up backend");
         self.dispatch_event(WindowEvent::OnStart);
         self.window = Some(rc_window);
     }

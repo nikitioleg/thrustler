@@ -1,5 +1,4 @@
 use std::fmt::{Display, Formatter};
-
 use error_stack::Context;
 
 #[derive(Debug)]
