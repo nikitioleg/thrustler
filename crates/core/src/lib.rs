@@ -14,8 +14,6 @@ pub enum WindowEvent {
 }
 
 pub trait ThrustlerBackend {
-    type Window;
-    fn init(&mut self, window: Self::Window) -> Result<(), ThrustlerError>;
     fn test_draw(&mut self);
 }
 

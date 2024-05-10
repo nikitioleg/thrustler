@@ -16,7 +16,7 @@ mod error;
 
 pub struct Engine {
     window: Box<dyn ThrustlerWindow>,
-    backend: Rc<RefCell<dyn ThrustlerBackend<Window=Arc<dyn VulkanWindow>>>>,
+    backend: Rc<RefCell<dyn ThrustlerBackend>>,
 }
 
 impl Engine {
@@ -28,7 +28,9 @@ impl Engine {
         let window = WinitWindow::new(
             size,
             Box::new(move |window| {
-                let vulkan_window = unsafe { transmute::<Arc<dyn OutputWindow>, Arc<dyn VulkanWindow>>(window) };
+                let vulkan_window = unsafe {
+                    transmute::<Arc<dyn OutputWindow>, Arc<dyn VulkanWindow>>(window)
+                };
                 closure_backend.borrow_mut().init(vulkan_window.clone())
             }),
         )
@@ -55,10 +57,10 @@ impl Engine {
     }
 }
 
-fn on_start(_backend: Rc<RefCell<dyn ThrustlerBackend<Window=Arc<dyn VulkanWindow>>>>) {}
+fn on_start(_backend: Rc<RefCell<dyn ThrustlerBackend>>) {}
 
-fn on_draw(backend: Rc<RefCell<dyn ThrustlerBackend<Window=Arc<dyn VulkanWindow>>>>) {
+fn on_draw(backend: Rc<RefCell<dyn ThrustlerBackend>>) {
     backend.borrow_mut().test_draw();
 }
 
-fn on_stop(_backend: Rc<RefCell<dyn ThrustlerBackend<Window=Arc<dyn VulkanWindow>>>>) {}
+fn on_stop(_backend: Rc<RefCell<dyn ThrustlerBackend>>) {}

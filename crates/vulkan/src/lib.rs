@@ -57,18 +57,16 @@ impl VulkanBackend {
     fn get_toolkit(&self) -> &VulkanoToolkit {
         self.vulkano_toolkit.as_ref().unwrap()
     }
-}
 
-impl ThrustlerBackend for VulkanBackend {
-    type Window = Arc<dyn VulkanWindow>;
-
-    fn init(&mut self, window: Self::Window) -> Result<(), ThrustlerError> {
+    pub fn init(&mut self, window: Arc<dyn VulkanWindow>) -> Result<(), ThrustlerError> {
         let toolkit = create_vulkano_toolkit(self.screen_size, window)
             .change_context(ThrustlerError::GraphicalBackendError)?;
         self.vulkano_toolkit = Some(toolkit);
         Ok(())
     }
+}
 
+impl ThrustlerBackend for VulkanBackend {
     fn test_draw(&mut self) {
         let toolkit = self.get_toolkit();
         toolkit.buffer_executor.execute_buffer(|buffer_index| toolkit.buffers[buffer_index].clone());
