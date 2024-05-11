@@ -8,6 +8,7 @@ pub use error_stack::Result;
 
 use core::{Size, ThrustlerBackend, ThrustlerWindow, WindowEvent};
 pub use core::error::ThrustlerError;
+pub use core::game_objects::{Vertex, GameObject, Scene};
 use vulkan::VulkanBackend;
 use vulkan::vulkano_tools::VulkanWindow;
 use winit_window::{OutputWindow, WinitWindow};
@@ -17,15 +18,8 @@ mod error;
 pub struct Engine {
     window: Box<dyn ThrustlerWindow>,
     backend: Rc<RefCell<dyn ThrustlerBackend>>,
+    scenes: Vec<Box<dyn Scene>>,
 }
-
-fn on_start(_backend: Rc<RefCell<dyn ThrustlerBackend>>) {}
-
-fn on_draw(backend: Rc<RefCell<dyn ThrustlerBackend>>) {
-    backend.borrow_mut().test_draw();
-}
-
-fn on_stop(_backend: Rc<RefCell<dyn ThrustlerBackend>>) {}
 
 impl Engine {
     pub fn new_with_settings(engine_settings: EngineSettings) -> Result<Engine, ThrustlerError> {
@@ -61,21 +55,29 @@ impl Engine {
         Ok(Self {
             window: Box::new(window),
             backend,
+            scenes: vec![],
         })
     }
 
     pub fn start(mut self) -> Result<(), ThrustlerError> {
-        let window = self.window;
-        let backend = self.backend.clone();
-
-        window.start(Box::new(move |event| {
-            let backend = backend.clone();
-            match event {
-                WindowEvent::OnStart => on_start(backend),
-                WindowEvent::OnDraw => on_draw(backend),
-                WindowEvent::OnStop => on_stop(backend),
+        let back_clone = self.backend.clone();
+        self.window.start(Box::new(move |event| {
+            for scene in &mut self.scenes {
+                match event {
+                    WindowEvent::OnStart => scene.on_start(),
+                    WindowEvent::OnDraw => {
+                        scene.on_update();
+                        back_clone.clone().borrow_mut().draw_scene(scene)
+                    },
+                    WindowEvent::OnStop => scene.on_destroy(),
+                }
             }
         }))
+    }
+
+    pub fn add_scene(mut self, scene: impl Scene + 'static) -> Engine {
+        self.scenes.push(Box::new(scene));
+        self
     }
 }
 
@@ -128,7 +130,7 @@ impl EngineSettingsBuilder {
         self
     }
 
-    pub fn build(mut self) -> EngineSettings {
+    pub fn build(self) -> EngineSettings {
         let window_size = self.window_size.unwrap_or(Size::default());
         let window = self.window.unwrap_or(Window::Winit);
         let backend = self.backend.unwrap_or(Backend::Vulkan);
@@ -140,7 +142,6 @@ impl EngineSettingsBuilder {
         }
     }
 }
-
 
 enum Window {
     Winit,

@@ -4,6 +4,7 @@ use error_stack::Context;
 
 #[derive(Debug)]
 pub enum EngineError {
+    #[allow(unused)]
     InitialisationError,
 }
 

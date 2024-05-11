@@ -188,10 +188,6 @@ unsafe fn hook_up_debug_callback(instance: Arc<Instance>) -> Option<DebugUtilsMe
 pub(crate) fn create_surface(instance: Arc<Instance>,
                              window: Arc<dyn VulkanWindow>,
 ) -> Result<Arc<Surface>, ThrustlerBackendError> {
-    /*Surface::from_window(instance, window)
-        .attach_printable("Can't create surface")
-        .change_context(ThrustlerBackendError::CreationError)*/
-
     unsafe {
         Surface::from_window_ref(instance, &window)
             .attach_printable("Can't create surface")
@@ -358,65 +354,6 @@ pub(crate) fn create_render_pass(device: Arc<Device>, swapchain: Arc<Swapchain>)
         .change_context(ThrustlerBackendError::CreationError)
 }
 
-pub(crate) fn create_vertex_buffer(
-    memory_allocator: Arc<StandardMemoryAllocator>,
-    vertices: Vec<VulkanVertex>,
-) -> Result<Subbuffer<[VulkanVertex]>, ThrustlerBackendError> {
-    Buffer::from_iter(
-        memory_allocator.clone(),
-        BufferCreateInfo {
-            usage: BufferUsage::VERTEX_BUFFER,
-            ..Default::default()
-        },
-        AllocationCreateInfo {
-            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
-                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-            ..Default::default()
-        },
-        vertices,
-    )
-        .attach_printable("Unable to allocate vertex buffer")
-        .change_context(ThrustlerBackendError::AllocationError)
-}
-
-pub(crate) fn create_command_buffers(
-    command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
-    memory_allocator: Arc<StandardMemoryAllocator>,
-    queue: Arc<Queue>,
-    pipeline: Arc<GraphicsPipeline>,
-    framebuffers: &[Arc<Framebuffer>],
-    vertices: Vec<VulkanVertex>,
-) -> Result<Vec<Arc<PrimaryAutoCommandBuffer>>, ThrustlerBackendError> {
-    let vertices_count = vertices.len() as u32;
-    let vertices = create_vertex_buffer(memory_allocator, vertices)?;
-    let command_buffer_allocator = &*command_buffer_allocator;
-
-    framebuffers
-        .iter()
-        .map(|framebuffer| {
-            let builder = AutoCommandBufferBuilder::primary(
-                command_buffer_allocator,
-                queue.queue_family_index(),
-                // Don't forget to write the correct buffer usage.
-                CommandBufferUsage::MultipleSubmit,
-            )
-                .attach_printable("Can't create primary command buffer")
-                .change_context(ThrustlerBackendError::CreationError)?;
-
-            fill_render_pass(
-                builder,
-                framebuffer.clone(),
-                pipeline.clone(),
-                vertices.clone(),
-                vertices_count,
-            )
-                ?.build()
-                .attach_printable("Render pass stuffing is failed")
-                .change_context(ThrustlerBackendError::GraphicalApiError)
-        })
-        .collect()
-}
-
 fn fill_render_pass(
     mut builder: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
     framebuffer: Arc<Framebuffer>,
@@ -525,72 +462,140 @@ pub(crate) struct VulkanVertex {
     pub position: [f32; 2],
 }
 
-#[allow(unused)]
-pub(crate) struct BufferExecutor {
-    logical_device: Arc<Device>,
+pub(crate) struct CommandBufferExecutor {
+    command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
+    standard_memory_allocator: Arc<StandardMemoryAllocator>,
     queue: Arc<Queue>,
+    pipeline: Arc<GraphicsPipeline>,
+    logical_device: Arc<Device>,
     swapchain: Arc<Swapchain>,
-    pub last_frame_fence: RefCell<Option<Box<dyn GpuFuture>>>,
+    framebuffers: Vec<Arc<Framebuffer>>,
+    last_frame_fence: RefCell<Option<Box<dyn GpuFuture>>>,
 }
 
-pub(crate) enum ExecuteBufferResult {
+pub enum BufferExecutorResult {
     Done,
     Recreate,
-    Fail(String),
+    Fail,
 }
 
-impl BufferExecutor {
-    pub fn new(logical_device: Arc<Device>, queue: Arc<Queue>, swapchain: Arc<Swapchain>) -> Self {
+impl CommandBufferExecutor {
+    pub fn new(
+        command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
+        standard_memory_allocator: Arc<StandardMemoryAllocator>,
+        logical_device: Arc<Device>,
+        queue: Arc<Queue>,
+        pipeline: Arc<GraphicsPipeline>,
+        swapchain: Arc<Swapchain>,
+        framebuffers: Vec<Arc<Framebuffer>>,
+    ) -> Self {
         let last_frame_fence = RefCell::new(Some(sync::now(logical_device.clone()).boxed()));
-
         Self {
-            logical_device,
+            command_buffer_allocator,
+            standard_memory_allocator,
             queue,
+            pipeline,
+            logical_device,
             swapchain,
+            framebuffers,
             last_frame_fence,
         }
     }
 
-    pub fn execute_buffer<'a>(&self, ask_buffer: impl Fn(usize) -> Arc<PrimaryAutoCommandBuffer> + 'a) -> ExecuteBufferResult {
+    pub fn execute_buffer(&self, vertices: Vec<VulkanVertex>) -> BufferExecutorResult {
         swapchain::acquire_next_image(self.swapchain.clone(), None)
+            .map_err(|_| {
+                BufferExecutorResult::Fail
+            })
             .and_then(|(image_index, suboptimal, swapchain_future)| {
                 if suboptimal {
                     {
                         let mut mut_last_frame_fence = self.last_frame_fence.borrow_mut();
                         mut_last_frame_fence.as_mut().unwrap().cleanup_finished();
                     }
-                    Ok(ExecuteBufferResult::Recreate)
+                    Ok(BufferExecutorResult::Recreate)
                 } else {
-                    self.last_frame_fence
-                        .take()
-                        .unwrap_or(sync::now(self.logical_device.clone()).boxed())
-                        .join(swapchain_future)
-                        .then_execute(self.queue.clone(), ask_buffer(image_index as usize).clone())
-                        .unwrap()
-                        .then_swapchain_present(
-                            self.queue.clone(),
-                            SwapchainPresentInfo::swapchain_image_index(self.swapchain.clone(), image_index),
-                        )
-                        .then_signal_fence_and_flush()
-                        .map(|future| {
-                            {
-                                let mut mut_last_frame_fence = self.last_frame_fence.borrow_mut();
-                                mut_last_frame_fence.replace(sync::now(self.logical_device.clone()).boxed());
-                            }
-                            ExecuteBufferResult::Done
+                    self.create_command_buffer(self.framebuffers[image_index as usize].clone(), vertices)
+                        .map_err(|_| BufferExecutorResult::Fail)
+                        .and_then(|command_buffer| {
+                            self.last_frame_fence
+                                .take()
+                                .unwrap_or(sync::now(self.logical_device.clone()).boxed())
+                                .join(swapchain_future)
+                                .then_execute(self.queue.clone(), command_buffer)
+                                .map_err(|_| BufferExecutorResult::Fail)
+                                .and_then(|exec_future| {
+                                    exec_future
+                                        .then_swapchain_present(
+                                            self.queue.clone(),
+                                            SwapchainPresentInfo::swapchain_image_index(self.swapchain.clone(), image_index),
+                                        )
+                                        .then_signal_fence_and_flush()
+                                        .map(|_future| {
+                                            {
+                                                let mut mut_last_frame_fence = self.last_frame_fence.borrow_mut();
+                                                mut_last_frame_fence.replace(sync::now(self.logical_device.clone()).boxed());
+                                            }
+                                            BufferExecutorResult::Done
+                                        })
+                                        .map_err(Validated::unwrap)
+                                        .map_err(|err| match err {
+                                            VulkanError::OutOfDate => {
+                                                {
+                                                    let mut mut_last_frame_fence = self.last_frame_fence.borrow_mut();
+                                                    mut_last_frame_fence.as_mut().unwrap().cleanup_finished();
+                                                }
+                                                BufferExecutorResult::Recreate
+                                            }
+                                            _ => BufferExecutorResult::Fail
+                                        })
+                                })
                         })
                 }
             })
-            .map_err(Validated::unwrap)
-            .unwrap_or_else(|err| match err {
-                VulkanError::OutOfDate => {
-                    {
-                        let mut mut_last_frame_fence = self.last_frame_fence.borrow_mut();
-                        mut_last_frame_fence.as_mut().unwrap().cleanup_finished();
-                    }
-                    ExecuteBufferResult::Recreate
-                }
-                _ => ExecuteBufferResult::Fail(err.to_string())
-            })
+            .unwrap_or_else(|err| err)
+    }
+    fn create_command_buffer(&self, framebuffer: Arc<Framebuffer>, vertices: Vec<VulkanVertex>) -> Result<Arc<PrimaryAutoCommandBuffer>, ThrustlerBackendError> {
+        let vertices_count = vertices.len() as u32;
+        let vertices = self.create_vertex_buffer(vertices)?;
+        let command_buffer_allocator = &*self.command_buffer_allocator;
+
+        let builder = AutoCommandBufferBuilder::primary(
+            command_buffer_allocator,
+            self.queue.clone().queue_family_index(),
+            //TODO  Don't forget to write the correct buffer usage.
+            CommandBufferUsage::MultipleSubmit,
+        )
+            .attach_printable("Can't create primary command buffer")
+            .change_context(ThrustlerBackendError::CreationError)?;
+
+        fill_render_pass(
+            builder,
+            framebuffer.clone(),
+            self.pipeline.clone(),
+            vertices.clone(),
+            vertices_count,
+        )
+            ?.build()
+            .attach_printable("Render pass stuffing is failed")
+            .change_context(ThrustlerBackendError::GraphicalApiError)
+    }
+
+    fn create_vertex_buffer(&self, vertices: Vec<VulkanVertex>) -> Result<Subbuffer<[VulkanVertex]>, ThrustlerBackendError> {
+        Buffer::from_iter(
+            self.standard_memory_allocator.clone(),
+            BufferCreateInfo {
+                usage: BufferUsage::VERTEX_BUFFER,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                ..Default::default()
+            },
+            vertices,
+        )
+            .attach_printable("Unable to allocate vertex buffer")
+            .change_context(ThrustlerBackendError::AllocationError)
     }
 }

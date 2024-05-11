@@ -1,8 +1,10 @@
 use error_stack::Result;
 
 use crate::error::ThrustlerError;
+use crate::game_objects::Scene;
 
 pub mod error;
+pub mod game_objects;
 
 pub trait ThrustlerWindow {
     fn start(&self, dispatcher: Box<dyn FnMut(WindowEvent) -> ()>) -> Result<(), ThrustlerError>;
@@ -15,7 +17,7 @@ pub enum WindowEvent {
 }
 
 pub trait ThrustlerBackend {
-    fn test_draw(&mut self);
+    fn draw_scene(&mut self, scene: &Box<dyn Scene>);
 }
 
 #[derive(Debug, Copy, Clone)]

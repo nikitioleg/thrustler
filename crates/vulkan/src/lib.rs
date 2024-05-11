@@ -2,22 +2,16 @@ use std::sync::Arc;
 
 use error_stack::{Result, ResultExt};
 use vulkano::command_buffer::allocator::{StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo};
-use vulkano::command_buffer::PrimaryAutoCommandBuffer;
-use vulkano::device::{Device, Queue};
-use vulkano::device::physical::PhysicalDevice;
 use vulkano::instance::debug::DebugUtilsMessenger;
-use vulkano::instance::Instance;
 use vulkano::memory::allocator::StandardMemoryAllocator;
-use vulkano::pipeline::GraphicsPipeline;
-use vulkano::render_pass::{Framebuffer, RenderPass};
-use vulkano::swapchain::{Surface, Swapchain};
 
 use core::{Size, ThrustlerBackend};
 use core::error::ThrustlerError;
-use vulkano_tools::{BufferExecutor, VulkanWindow};
+use core::game_objects::Scene;
+use vulkano_tools::VulkanWindow;
 
 use crate::shaders::{simple_fragment_shader, simple_vertex_shader};
-use crate::vulkano_tools::{create_command_buffers, create_framebuffers, create_pipeline, create_render_pass, create_surface, create_swapchain, create_vulkan_library, crete_logical_device, pick_physical_device_and_queue_family_index, ThrustlerBackendError, VulkanVertex};
+use crate::vulkano_tools::{CommandBufferExecutor, create_framebuffers, create_pipeline, create_render_pass, create_surface, create_swapchain, create_vulkan_library, crete_logical_device, pick_physical_device_and_queue_family_index, ThrustlerBackendError, VulkanVertex};
 
 pub mod vulkano_tools;
 mod shaders;
@@ -27,20 +21,10 @@ pub struct VulkanBackend {
     vulkano_toolkit: Option<VulkanoToolkit>,
 }
 
-#[allow(unused)]
 struct VulkanoToolkit {
-    instance: Arc<Instance>,
-    physical_device: Arc<PhysicalDevice>,
-    logical_device: Arc<Device>,
-    queue: Arc<Queue>,
-    surface: Arc<Surface>,
-    swapchain: Arc<Swapchain>,
-    framebuffers: Vec<Arc<Framebuffer>>,
-    render_pass: Arc<RenderPass>,
-    pipeline: Arc<GraphicsPipeline>,
-    buffers: Vec<Arc<PrimaryAutoCommandBuffer>>,
-    buffer_executor: BufferExecutor,
+    command_buffer_executor: CommandBufferExecutor,
     //have to hold this struct to keep getting debug logs
+    #[allow(unused)]
     debug_callback: Option<DebugUtilsMessenger>,
 }
 
@@ -68,9 +52,19 @@ impl VulkanBackend {
 }
 
 impl ThrustlerBackend for VulkanBackend {
-    fn test_draw(&mut self) {
+    fn draw_scene(&mut self, scene: &Box<dyn Scene>) {
         let toolkit = self.get_toolkit();
-        toolkit.buffer_executor.execute_buffer(|buffer_index| toolkit.buffers[buffer_index].clone());
+
+        let vulkano_vertices: Vec<VulkanVertex> = scene.get_scene_objects().iter().map(|game_object| {
+            &game_object.vertices
+        })
+            .flatten()
+            .map(|common_vertex| {
+                VulkanVertex { position: common_vertex.position }
+            })
+            .collect();
+
+        toolkit.command_buffer_executor.execute_buffer(vulkano_vertices);
     }
 }
 
@@ -135,39 +129,18 @@ fn create_vulkano_toolkit(
         StandardCommandBufferAllocatorCreateInfo::default()),
     );
 
-    let vertex1 = VulkanVertex {
-        position: [0.0, -0.5],
-    };
-    let vertex2 = VulkanVertex {
-        position: [0.5, 0.5],
-    };
-    let vertex3 = VulkanVertex {
-        position: [-0.5, 0.5],
-    };
-
-    let buffers = create_command_buffers(
+    let command_buffer_executor = CommandBufferExecutor::new(
         command_buffer_allocator.clone(),
         memory_allocator.clone(),
+        logical_device.clone(),
         queue.clone(),
         pipeline.clone(),
-        &framebuffers,
-        vec![vertex1, vertex2, vertex3],
-    )?;
-
-    let buffer_executor = BufferExecutor::new(logical_device.clone(), queue.clone(), swapchain.clone());
+        swapchain.clone(),
+        framebuffers.clone(),
+    );
 
     Ok(VulkanoToolkit {
-        instance,
-        physical_device,
-        logical_device,
-        queue,
-        surface,
-        swapchain,
-        framebuffers,
-        render_pass,
-        pipeline,
-        buffers,
-        buffer_executor,
+        command_buffer_executor,
         debug_callback,
     })
 }
