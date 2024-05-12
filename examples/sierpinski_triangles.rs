@@ -6,7 +6,10 @@ use engine::ThrustlerError;
 fn main() -> Result<(), ThrustlerError> {
     Ok(
         Engine::new_with_settings(
-            EngineSettings::default()
+            EngineSettings{
+                frames_per_second: 5,
+                ..EngineSettings::default()
+            }
         )?
             .add_scene(SierpinskiTriangles::new())
             .start()?,
@@ -21,8 +24,7 @@ impl SierpinskiTriangles {
     fn new() -> Self {
         Self {
             game_objects: vec![
-                GameObject::new(vec![Vertex::new([0.0, -0.5]), Vertex::new([0.5, 0.5]), Vertex::new([-0.5, 0.5])]),
-            //    GameObject::new(vec![Vertex::new([-1.0, -1.0]), Vertex::new([-1.0, -0.5]), Vertex::new([-0.2, -0.2])]),
+                GameObject::new(vec![Vertex::new([-1.0, 1.0]), Vertex::new([0.0, -1.0]), Vertex::new([1.0, 1.0])]),
             ]
         }
     }
