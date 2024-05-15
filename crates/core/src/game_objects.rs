@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub struct GameObject {
     pub vertices: Vec<Vertex>,
 }
@@ -10,8 +11,19 @@ impl GameObject {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 pub struct Vertex {
     pub position: [f32; 2],
+}
+
+impl Vertex {
+    pub fn x(&self) -> f32 {
+        self.position[0]
+    }
+
+    pub fn y(&self) -> f32 {
+        self.position[1]
+    }
 }
 
 impl Vertex {
