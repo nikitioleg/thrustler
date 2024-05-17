@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 core.workspace = true
 error-stack.workspace = true
-raw-window-handle.workspace = true
-vulkano = "0.34.1"
+raw-window-handle = "0.6.2"
+# that commit is used because of https://github.com/vulkano-rs/vulkano/pull/2490
+vulkano = { git = "https://github.com/vulkano-rs/vulkano.git", rev = "b1506a0" }
 vulkano-shaders = "0.34.0"

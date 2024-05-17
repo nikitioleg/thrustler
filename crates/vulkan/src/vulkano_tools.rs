@@ -4,16 +4,16 @@ use std::sync::Arc;
 
 use error_stack::{Context, Report, Result};
 use error_stack::ResultExt;
-use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use vulkano::{swapchain, sync, Validated, VulkanError, VulkanLibrary};
 use vulkano::buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer};
-use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer, RenderPassBeginInfo, SubpassBeginInfo, SubpassContents, SubpassEndInfo};
+use vulkano::command_buffer::{CommandBuffer, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsage, RecordingCommandBuffer, RenderPassBeginInfo, SubpassBeginInfo, SubpassContents, SubpassEndInfo};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
 use vulkano::device::{Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags};
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType};
 use vulkano::image::{Image, ImageUsage};
 use vulkano::image::view::ImageView;
-use vulkano::instance::{Instance, InstanceCreateInfo, InstanceExtensions, LayerProperties};
+use vulkano::instance::{Instance, InstanceCreateFlags, InstanceCreateInfo, InstanceExtensions, LayerProperties};
 use vulkano::instance::debug::{DebugUtilsMessageSeverity, DebugUtilsMessageType, DebugUtilsMessenger, DebugUtilsMessengerCallback, DebugUtilsMessengerCreateInfo};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
 use vulkano::pipeline::{GraphicsPipeline, PipelineLayout, PipelineShaderStageCreateInfo};
@@ -58,7 +58,7 @@ impl Display for ThrustlerBackendError {
 
 impl Context for ThrustlerBackendError {}
 
-pub trait VulkanWindow: HasRawWindowHandle + HasRawDisplayHandle {}
+pub trait VulkanWindow: HasWindowHandle + HasDisplayHandle {}
 
 pub(crate) fn create_vulkan_library(
     window: Arc<dyn VulkanWindow>,
@@ -69,6 +69,8 @@ pub(crate) fn create_vulkan_library(
     let required_extensions = InstanceExtensions {
         ext_debug_utils: is_debug,
         ..Surface::required_extensions(&window)
+            .attach_printable("Can't get required extensions")
+            .change_context(ThrustlerBackendError::BackendUnavailable)?
     };
 
     let library = VulkanLibrary::new()
@@ -84,8 +86,7 @@ pub(crate) fn create_vulkan_library(
     let instance = Instance::new(
         library,
         InstanceCreateInfo {
-            // enable for osx
-            // flags: InstanceCreateFlags::ENUMERATE_PORTABILITY,
+            flags: InstanceCreateFlags::ENUMERATE_PORTABILITY,
             enabled_layers: validation_layers_for_enabling,
             enabled_extensions: required_extensions,
             ..Default::default()
@@ -95,10 +96,10 @@ pub(crate) fn create_vulkan_library(
         .change_context(ThrustlerBackendError::CreationError)?;
 
     let debug_callback = if is_debug {
-        let hook_up_callback_result = unsafe { hook_up_debug_callback(instance.clone()) };
+        let hook_up_callback_result = hook_up_debug_callback(instance.clone());
         match hook_up_callback_result {
-            None => println!("Debug callback wasn't attached"),
-            Some(_) => println!("Debug callback was attached")
+            None => println!("Debug callback has been attached"),
+            Some(_) => println!("Debug callback hasn't attached")
         }
         hook_up_callback_result
     } else {
@@ -136,7 +137,44 @@ fn prepare_layers_for_enabling(library: Arc<VulkanLibrary>, required_validation_
         .collect::<Vec<String>>()
 }
 
-unsafe fn hook_up_debug_callback(instance: Arc<Instance>) -> Option<DebugUtilsMessenger> {
+fn hook_up_debug_callback(instance: Arc<Instance>) -> Option<DebugUtilsMessenger> {
+    let debug_callback = unsafe {
+        DebugUtilsMessengerCallback::new(
+            |message_severity, message_type, callback_data| {
+                let severity = if message_severity.intersects(DebugUtilsMessageSeverity::ERROR) {
+                    "error"
+                } else if message_severity.intersects(DebugUtilsMessageSeverity::WARNING) {
+                    "warning"
+                } else if message_severity.intersects(DebugUtilsMessageSeverity::INFO) {
+                    "information"
+                } else if message_severity.intersects(DebugUtilsMessageSeverity::VERBOSE) {
+                    "verbose"
+                } else {
+                    panic!("no-impl");
+                };
+
+                let message_type = if message_type.intersects(DebugUtilsMessageType::GENERAL) {
+                    "general"
+                } else if message_type.intersects(DebugUtilsMessageType::VALIDATION) {
+                    "validation"
+                } else if message_type.intersects(DebugUtilsMessageType::PERFORMANCE) {
+                    "performance"
+                } else {
+                    panic!("no-impl");
+                };
+
+                println!(
+                    "{} {} {}: {}",
+                    callback_data.message_id_name.unwrap_or("unknown"),
+                    message_type,
+                    severity,
+                    callback_data.message.trim()
+                );
+            },
+        )
+    };
+
+
     DebugUtilsMessenger::new(
         instance,
         DebugUtilsMessengerCreateInfo {
@@ -147,39 +185,7 @@ unsafe fn hook_up_debug_callback(instance: Arc<Instance>) -> Option<DebugUtilsMe
             message_type: DebugUtilsMessageType::GENERAL
                 | DebugUtilsMessageType::VALIDATION
                 | DebugUtilsMessageType::PERFORMANCE,
-            ..DebugUtilsMessengerCreateInfo::user_callback(DebugUtilsMessengerCallback::new(
-                |message_severity, message_type, callback_data| {
-                    let severity = if message_severity.intersects(DebugUtilsMessageSeverity::ERROR) {
-                        "error"
-                    } else if message_severity.intersects(DebugUtilsMessageSeverity::WARNING) {
-                        "warning"
-                    } else if message_severity.intersects(DebugUtilsMessageSeverity::INFO) {
-                        "information"
-                    } else if message_severity.intersects(DebugUtilsMessageSeverity::VERBOSE) {
-                        "verbose"
-                    } else {
-                        panic!("no-impl");
-                    };
-
-                    let message_type = if message_type.intersects(DebugUtilsMessageType::GENERAL) {
-                        "general"
-                    } else if message_type.intersects(DebugUtilsMessageType::VALIDATION) {
-                        "validation"
-                    } else if message_type.intersects(DebugUtilsMessageType::PERFORMANCE) {
-                        "performance"
-                    } else {
-                        panic!("no-impl");
-                    };
-
-                    println!(
-                        "{} {} {}: {}",
-                        callback_data.message_id_name.unwrap_or("unknown"),
-                        message_type,
-                        severity,
-                        callback_data.message.trim()
-                    );
-                },
-            ))
+            ..DebugUtilsMessengerCreateInfo::user_callback(debug_callback)
         },
     )
         .ok()
@@ -355,12 +361,12 @@ pub(crate) fn create_render_pass(device: Arc<Device>, swapchain: Arc<Swapchain>)
 }
 
 fn fill_render_pass(
-    mut builder: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+    mut builder: RecordingCommandBuffer,
     framebuffer: Arc<Framebuffer>,
     pipeline: Arc<GraphicsPipeline>,
     vertices: Subbuffer<[VulkanVertex]>,
     vertices_count: u32,
-) -> Result<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, ThrustlerBackendError> {
+) -> Result<RecordingCommandBuffer, ThrustlerBackendError> {
     builder
         .begin_render_pass(
             RenderPassBeginInfo {
@@ -379,11 +385,13 @@ fn fill_render_pass(
         .change_context(ThrustlerBackendError::GraphicalApiError)?
         .bind_vertex_buffers(0, vertices.clone())
         .attach_printable("Bind vertex buffer is failed")
-        .change_context(ThrustlerBackendError::GraphicalApiError)?
-        .draw(vertices_count, 1, 0, 0)
+        .change_context(ThrustlerBackendError::GraphicalApiError)?;
+
+    unsafe { builder.draw(vertices_count, 1, 0, 0) }
         .attach_printable("Draw is failed")
-        .change_context(ThrustlerBackendError::GraphicalApiError)?
-        .end_render_pass(SubpassEndInfo::default())
+        .change_context(ThrustlerBackendError::GraphicalApiError)?;
+
+    builder.end_render_pass(SubpassEndInfo::default())
         .attach_printable("End render pass is failed")
         .change_context(ThrustlerBackendError::GraphicalApiError)?;
     Ok(builder)
@@ -405,7 +413,7 @@ pub(crate) fn create_pipeline(
     ];
 
     let vertex_input_state = VulkanVertex::per_vertex()
-        .definition(&vs.info().input_interface)
+        .definition(&vs)
         .attach_printable("Can't get vertex definition")
         .change_context(ThrustlerBackendError::GraphicalApiError)?;
 
@@ -555,16 +563,18 @@ impl CommandBufferExecutor {
             })
             .unwrap_or_else(|err| err)
     }
-    fn create_command_buffer(&self, framebuffer: Arc<Framebuffer>, vertices: Vec<VulkanVertex>) -> Result<Arc<PrimaryAutoCommandBuffer>, ThrustlerBackendError> {
+    fn create_command_buffer(&self, framebuffer: Arc<Framebuffer>, vertices: Vec<VulkanVertex>) -> Result<Arc<CommandBuffer>, ThrustlerBackendError> {
         let vertices_count = vertices.len() as u32;
         let vertices = self.create_vertex_buffer(vertices)?;
-        let command_buffer_allocator = &*self.command_buffer_allocator;
 
-        let builder = AutoCommandBufferBuilder::primary(
-            command_buffer_allocator,
+        let builder = RecordingCommandBuffer::new(
+            self.command_buffer_allocator.clone(),
             self.queue.clone().queue_family_index(),
-            //TODO  Don't forget to write the correct buffer usage.
-            CommandBufferUsage::MultipleSubmit,
+            CommandBufferLevel::Primary,
+            CommandBufferBeginInfo {
+                usage: CommandBufferUsage::OneTimeSubmit,
+                ..Default::default()
+            },
         )
             .attach_printable("Can't create primary command buffer")
             .change_context(ThrustlerBackendError::CreationError)?;
@@ -576,7 +586,7 @@ impl CommandBufferExecutor {
             vertices.clone(),
             vertices_count,
         )
-            ?.build()
+            ?.end()
             .attach_printable("Render pass stuffing is failed")
             .change_context(ThrustlerBackendError::GraphicalApiError)
     }

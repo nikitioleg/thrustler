@@ -5,10 +5,10 @@ use std::sync::Arc;
 
 use error_stack::Result;
 use error_stack::ResultExt;
-use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event_loop::ActiveEventLoop;
+use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use core::{Size, ThrustlerWindow, WindowEvent};
@@ -98,6 +98,7 @@ impl ApplicationHandler<()> for WindowState {
         match event {
             winit::event::WindowEvent::CloseRequested => {
                 self.dispatch_event(WindowEvent::OnStop);
+                let _ = self.window.take();
                 event_loop.exit();
             }
             winit::event::WindowEvent::RedrawRequested => {
@@ -108,10 +109,13 @@ impl ApplicationHandler<()> for WindowState {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        self.window.as_ref().unwrap().clone().request_redraw()
+        match self.window.as_ref() {
+            None => (),
+            Some(window) => window.clone().request_redraw()
+        }
     }
 }
 
-pub trait OutputWindow: HasRawWindowHandle + HasRawDisplayHandle + Any + Send + Sync {}
+pub trait OutputWindow: HasWindowHandle + HasDisplayHandle + Any + Send + Sync {}
 
 impl OutputWindow for Window {}
