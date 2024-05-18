@@ -17,18 +17,16 @@ pub struct Vertex {
 }
 
 impl Vertex {
+    pub fn new(position: [f32; 2]) -> Self {
+        Self { position }
+    }
+
     pub fn x(&self) -> f32 {
         self.position[0]
     }
 
     pub fn y(&self) -> f32 {
         self.position[1]
-    }
-}
-
-impl Vertex {
-    pub fn new(position: [f32; 2]) -> Self {
-        Self { position }
     }
 }
 

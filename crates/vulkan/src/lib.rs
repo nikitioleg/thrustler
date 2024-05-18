@@ -11,7 +11,7 @@ use core::game_objects::Scene;
 use vulkano_tools::VulkanWindow;
 
 use crate::shaders::{simple_fragment_shader, simple_vertex_shader};
-use crate::vulkano_tools::{CommandBufferExecutor, create_framebuffers, create_pipeline, create_render_pass, create_surface, create_swapchain, create_vulkan_library, crete_logical_device, pick_physical_device_and_queue_family_index, ThrustlerBackendError, VulkanVertex};
+use crate::vulkano_tools::*;
 
 pub mod vulkano_tools;
 mod shaders;
@@ -54,15 +54,7 @@ impl VulkanBackend {
 impl ThrustlerBackend for VulkanBackend {
     fn draw_scene(&mut self, scene: &Box<dyn Scene>) {
         let toolkit = self.get_toolkit();
-
-        let vulkano_vertices: Vec<VulkanVertex> = scene.get_scene_objects().iter().map(|game_object| {
-            &game_object.vertices
-        })
-            .flatten()
-            .map(|common_vertex| {
-                VulkanVertex { position: common_vertex.position }
-            })
-            .collect();
+        let vulkano_vertices = scene.get_scene_objects().to_vulkano_vertices();
 
         toolkit.command_buffer_executor.execute_buffer(vulkano_vertices);
     }

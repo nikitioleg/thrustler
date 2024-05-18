@@ -30,7 +30,8 @@ use vulkano::shader::ShaderModule;
 use vulkano::swapchain::{Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo};
 use vulkano::sync::GpuFuture;
 
-use core::Size;
+use core::{Size};
+use core::game_objects::{GameObject, Vertex as ThrustlerVertex};
 
 #[derive(Debug)]
 pub(crate) enum ThrustlerBackendError {
@@ -463,13 +464,6 @@ pub(crate) fn create_pipeline(
         .change_context(ThrustlerBackendError::CreationError)
 }
 
-#[derive(BufferContents, Vertex)]
-#[repr(C)]
-pub(crate) struct VulkanVertex {
-    #[format(R32G32_SFLOAT)]
-    pub position: [f32; 2],
-}
-
 pub(crate) struct CommandBufferExecutor {
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     standard_memory_allocator: Arc<StandardMemoryAllocator>,
@@ -607,5 +601,35 @@ impl CommandBufferExecutor {
         )
             .attach_printable("Unable to allocate vertex buffer")
             .change_context(ThrustlerBackendError::AllocationError)
+    }
+}
+
+#[derive(BufferContents, Vertex)]
+#[repr(C)]
+pub(crate) struct VulkanVertex {
+    #[format(R32G32_SFLOAT)]
+    pub position: [f32; 2],
+}
+
+impl Into<VulkanVertex> for &ThrustlerVertex {
+    fn into(self) -> VulkanVertex {
+        VulkanVertex {
+            position: self.position
+        }
+    }
+}
+
+pub(crate) trait IntoVulkanoVertices {
+    fn to_vulkano_vertices(&self) -> Vec<VulkanVertex>;
+}
+
+impl IntoVulkanoVertices for &Vec<GameObject> {
+    fn to_vulkano_vertices(&self) -> Vec<VulkanVertex> {
+        self.iter().map(|game_object| {
+            &game_object.vertices
+        })
+            .flatten()
+            .map(|vertex| vertex.into())
+            .collect()
     }
 }
