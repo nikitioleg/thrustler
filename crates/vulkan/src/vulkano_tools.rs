@@ -1,10 +1,12 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 
 use error_stack::{Context, Report, Result};
 use error_stack::ResultExt;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+use uuid::Uuid;
 use vulkano::{swapchain, sync, Validated, VulkanError, VulkanLibrary};
 use vulkano::buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer};
 use vulkano::command_buffer::{CommandBuffer, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsage, RecordingCommandBuffer, RenderPassBeginInfo, SubpassBeginInfo, SubpassContents, SubpassEndInfo};
@@ -361,43 +363,6 @@ pub(crate) fn create_render_pass(device: Arc<Device>, swapchain: Arc<Swapchain>)
         .change_context(ThrustlerBackendError::CreationError)
 }
 
-fn fill_render_pass(
-    mut builder: RecordingCommandBuffer,
-    framebuffer: Arc<Framebuffer>,
-    pipeline: Arc<GraphicsPipeline>,
-    vertices: Subbuffer<[VulkanVertex]>,
-    vertices_count: u32,
-) -> Result<RecordingCommandBuffer, ThrustlerBackendError> {
-    builder
-        .begin_render_pass(
-            RenderPassBeginInfo {
-                clear_values: vec![Some([0.1, 0.1, 0.1, 1.0].into())],
-                ..RenderPassBeginInfo::framebuffer(framebuffer.clone())
-            },
-            SubpassBeginInfo {
-                contents: SubpassContents::Inline,
-                ..Default::default()
-            },
-        )
-        .attach_printable("Begin render pass is failed")
-        .change_context(ThrustlerBackendError::GraphicalApiError)?
-        .bind_pipeline_graphics(pipeline.clone())
-        .attach_printable("Bind pipeline is failed")
-        .change_context(ThrustlerBackendError::GraphicalApiError)?
-        .bind_vertex_buffers(0, vertices.clone())
-        .attach_printable("Bind vertex buffer is failed")
-        .change_context(ThrustlerBackendError::GraphicalApiError)?;
-
-    unsafe { builder.draw(vertices_count, 1, 0, 0) }
-        .attach_printable("Draw is failed")
-        .change_context(ThrustlerBackendError::GraphicalApiError)?;
-
-    builder.end_render_pass(SubpassEndInfo::default())
-        .attach_printable("End render pass is failed")
-        .change_context(ThrustlerBackendError::GraphicalApiError)?;
-    Ok(builder)
-}
-
 pub(crate) fn create_pipeline(
     device: Arc<Device>,
     vs: Arc<ShaderModule>,
@@ -465,6 +430,7 @@ pub(crate) fn create_pipeline(
 }
 
 pub(crate) struct CommandBufferExecutor {
+    subbuffer_cache: HashMap<Uuid, (Subbuffer<[VulkanVertex]>, bool)>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     standard_memory_allocator: Arc<StandardMemoryAllocator>,
     queue: Arc<Queue>,
@@ -501,10 +467,11 @@ impl CommandBufferExecutor {
             swapchain,
             framebuffers,
             last_frame_fence,
+            subbuffer_cache: HashMap::new(),
         }
     }
 
-    pub fn execute_buffer(&self, vertices: Vec<VulkanVertex>) -> BufferExecutorResult {
+    pub fn execute_buffer(&mut self, game_objects: &Vec<GameObject>) -> BufferExecutorResult {
         swapchain::acquire_next_image(self.swapchain.clone(), None)
             .map_err(|_| {
                 BufferExecutorResult::Fail
@@ -517,7 +484,7 @@ impl CommandBufferExecutor {
                     }
                     Ok(BufferExecutorResult::Recreate)
                 } else {
-                    self.create_command_buffer(self.framebuffers[image_index as usize].clone(), vertices)
+                    self.create_command_buffer(self.framebuffers[image_index as usize].clone(), game_objects)
                         .map_err(|_| BufferExecutorResult::Fail)
                         .and_then(|command_buffer| {
                             self.last_frame_fence
@@ -557,10 +524,7 @@ impl CommandBufferExecutor {
             })
             .unwrap_or_else(|err| err)
     }
-    fn create_command_buffer(&self, framebuffer: Arc<Framebuffer>, vertices: Vec<VulkanVertex>) -> Result<Arc<CommandBuffer>, ThrustlerBackendError> {
-        let vertices_count = vertices.len() as u32;
-        let vertices = self.create_vertex_buffer(vertices)?;
-
+    fn create_command_buffer(&mut self, framebuffer: Arc<Framebuffer>, game_objects: &Vec<GameObject>) -> Result<Arc<CommandBuffer>, ThrustlerBackendError> {
         let builder = RecordingCommandBuffer::new(
             self.command_buffer_allocator.clone(),
             self.queue.clone().queue_family_index(),
@@ -573,19 +537,54 @@ impl CommandBufferExecutor {
             .attach_printable("Can't create primary command buffer")
             .change_context(ThrustlerBackendError::CreationError)?;
 
-        fill_render_pass(
+        self.fill_render_pass(
             builder,
             framebuffer.clone(),
             self.pipeline.clone(),
-            vertices.clone(),
-            vertices_count,
+            game_objects,
         )
             ?.end()
             .attach_printable("Render pass stuffing is failed")
             .change_context(ThrustlerBackendError::GraphicalApiError)
     }
 
-    fn create_vertex_buffer(&self, vertices: Vec<VulkanVertex>) -> Result<Subbuffer<[VulkanVertex]>, ThrustlerBackendError> {
+
+    fn mark_buffers_as_unused(&mut self) {
+        self.subbuffer_cache.values_mut().for_each(|chunk| {
+            chunk.1 = false;
+        })
+    }
+
+    fn delete_all_unused_buffers(&mut self) {
+        let dead_buffer_uuids: Vec<_> = self.subbuffer_cache.iter().filter_map(|bucket| {
+            if !bucket.1.1 {
+                Some(*bucket.0)
+            } else {
+                None
+            }
+        }).collect();
+
+        for dead_buffer_uuid in dead_buffer_uuids {
+            self.subbuffer_cache.remove(&dead_buffer_uuid);
+        }
+    }
+
+    fn get_subbuffer_for_game_object(&mut self, game_object: &GameObject) -> Result<Subbuffer<[VulkanVertex]>, ThrustlerBackendError> {
+        let subbuffer = if let Some(subbuffer) = self.subbuffer_cache.get_mut(&game_object.id) {
+            subbuffer.1 = true;
+            subbuffer.0.clone()
+        } else {
+            let vertices = self.create_vertex_buffer(game_object)?;
+            self.subbuffer_cache.insert(game_object.id, (vertices.clone(), true));
+            vertices
+        };
+
+        Ok(subbuffer)
+    }
+
+    fn create_vertex_buffer(&self, game_object: &GameObject) -> Result<Subbuffer<[VulkanVertex]>, ThrustlerBackendError> {
+        let vertices = game_object.to_vulkano_vertices();
+
         Buffer::from_iter(
             self.standard_memory_allocator.clone(),
             BufferCreateInfo {
@@ -601,6 +600,54 @@ impl CommandBufferExecutor {
         )
             .attach_printable("Unable to allocate vertex buffer")
             .change_context(ThrustlerBackendError::AllocationError)
+    }
+
+    fn fill_render_pass(
+        &mut self,
+        mut builder: RecordingCommandBuffer,
+        framebuffer: Arc<Framebuffer>,
+        pipeline: Arc<GraphicsPipeline>,
+        game_objects: &Vec<GameObject>,
+    ) -> Result<RecordingCommandBuffer, ThrustlerBackendError> {
+        builder
+            .begin_render_pass(
+                RenderPassBeginInfo {
+                    clear_values: vec![Some([0.1, 0.1, 0.1, 1.0].into())],
+                    ..RenderPassBeginInfo::framebuffer(framebuffer.clone())
+                },
+                SubpassBeginInfo {
+                    contents: SubpassContents::Inline,
+                    ..Default::default()
+                },
+            )
+            .attach_printable("Begin render pass is failed")
+            .change_context(ThrustlerBackendError::GraphicalApiError)?
+            .bind_pipeline_graphics(pipeline.clone())
+            .attach_printable("Bind pipeline is failed")
+            .change_context(ThrustlerBackendError::GraphicalApiError)?;
+
+
+        //Mark all existing subbuffers as unused
+        self.mark_buffers_as_unused();
+        for game_object in game_objects {
+            let vertices = self.get_subbuffer_for_game_object(game_object)?;
+            let vertices_count = vertices.len() as u32;
+
+            builder.bind_vertex_buffers(0, vertices)
+                .attach_printable("Bind vertex buffer is failed")
+                .change_context(ThrustlerBackendError::GraphicalApiError)?;
+
+            unsafe { builder.draw(vertices_count, 1, 0, 0) }
+                .attach_printable("Draw is failed")
+                .change_context(ThrustlerBackendError::GraphicalApiError)?;
+        }
+        //Delete all subbuffers which weren't used
+        self.delete_all_unused_buffers();
+
+        builder.end_render_pass(SubpassEndInfo::default())
+            .attach_printable("End render pass is failed")
+            .change_context(ThrustlerBackendError::GraphicalApiError)?;
+        Ok(builder)
     }
 }
 
@@ -623,13 +670,8 @@ pub(crate) trait IntoVulkanoVertices {
     fn to_vulkano_vertices(&self) -> Vec<VulkanVertex>;
 }
 
-impl IntoVulkanoVertices for &Vec<GameObject> {
+impl IntoVulkanoVertices for &GameObject {
     fn to_vulkano_vertices(&self) -> Vec<VulkanVertex> {
-        self.iter().map(|game_object| {
-            &game_object.vertices
-        })
-            .flatten()
-            .map(|vertex| vertex.into())
-            .collect()
+        self.vertices.iter().map(|vertex| vertex.into()).collect()
     }
 }

@@ -18,3 +18,4 @@ core = { path = "../thrustler/crates/core"}
 vulkan = { path = "../thrustler/crates/vulkan" }
 winit-window = { path = "../thrustler/crates/winit-window" }
 error-stack = "0.4.1"
+uuid = { version = "1.8.0", features = ["v4"] }

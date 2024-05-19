@@ -1,12 +1,16 @@
+use uuid::Uuid;
+
 #[derive(Debug)]
 pub struct GameObject {
+    pub id: Uuid,
     pub vertices: Vec<Vertex>,
 }
 
 impl GameObject {
     pub fn new(vertices: Vec<Vertex>) -> Self {
         Self {
-            vertices
+            id: Uuid::new_v4(),
+            vertices,
         }
     }
 }

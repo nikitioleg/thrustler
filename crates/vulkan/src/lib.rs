@@ -38,8 +38,8 @@ impl VulkanBackend {
         }
     }
 
-    fn get_toolkit(&self) -> &VulkanoToolkit {
-        self.vulkano_toolkit.as_ref().unwrap()
+    fn get_toolkit(&mut self) -> &mut VulkanoToolkit {
+        self.vulkano_toolkit.as_mut().unwrap()
     }
 
     pub fn init(&mut self, window: Arc<dyn VulkanWindow>) -> Result<(), ThrustlerError> {
@@ -54,9 +54,9 @@ impl VulkanBackend {
 impl ThrustlerBackend for VulkanBackend {
     fn draw_scene(&mut self, scene: &Box<dyn Scene>) {
         let toolkit = self.get_toolkit();
-        let vulkano_vertices = scene.get_scene_objects().to_vulkano_vertices();
+        let game_objects = scene.get_scene_objects();
 
-        toolkit.command_buffer_executor.execute_buffer(vulkano_vertices);
+        toolkit.command_buffer_executor.execute_buffer(game_objects);
     }
 }
 

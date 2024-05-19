@@ -91,14 +91,13 @@ impl Scene for SierpinskiTriangles {
                 ])
             ]
         } else {
-            self.current_depth += 1;
-
             self.game_objects.iter()
                 .map(|game_object| Self::split_triangle(game_object))
                 .flatten()
                 .collect::<Vec<_>>()
         };
 
+        self.current_depth += 1;
         self.game_objects.clear();
 
         new_triangles.into_iter().for_each(|game_object| {
