@@ -12,6 +12,7 @@ pub use core::error::ThrustlerError;
 pub use core::game_objects::{GameObject, Scene, Vertex};
 use vulkan::VulkanBackend;
 use vulkan::vulkano_tools::VulkanWindow;
+use wgpu::{WgpuBackend, WgpuWindow};
 use winit_window::{OutputWindow, WinitWindow};
 
 mod error;
@@ -31,13 +32,26 @@ impl Engine {
             Backend::Vulkan => {
                 let backend = Rc::new(RefCell::new(VulkanBackend::new(size)));
                 let rc_backend = backend.clone();
-                let initializer = Box::new(move |window| {
-                    let vulkan_window = unsafe {
-                        transmute::<Arc<dyn OutputWindow>, Arc<dyn VulkanWindow>>(window)
-                    };
-                    rc_backend.borrow_mut().init(vulkan_window)
-                });
-                (backend, Some(initializer))
+                let initializer: Box<dyn Fn(Arc<dyn OutputWindow>) -> Result<(), ThrustlerError>> = Box::new(
+                    move |window| {
+                        let vulkan_window = unsafe {
+                            transmute::<Arc<dyn OutputWindow>, Arc<dyn VulkanWindow>>(window)
+                        };
+                        rc_backend.borrow_mut().init(vulkan_window)
+                    });
+                (backend as Rc<RefCell<dyn ThrustlerBackend>>, Some(initializer))
+            }
+            Backend::Wgpu => {
+                let backend = Rc::new(RefCell::new(WgpuBackend::new(size)));
+                let rc_backend = backend.clone();
+                let initializer: Box<dyn Fn(Arc<dyn OutputWindow>) -> Result<(), ThrustlerError>> = Box::new(
+                    move |window| {
+                        let wgpu_window = unsafe {
+                            transmute::<Arc<dyn OutputWindow>, Arc<dyn WgpuWindow>>(window)
+                        };
+                        rc_backend.borrow_mut().init(wgpu_window)
+                    });
+                (backend as Rc<RefCell<dyn ThrustlerBackend>>, Some(initializer))
             }
         };
 
@@ -47,7 +61,7 @@ impl Engine {
                     size,
                     initializer
                         .ok_or(Report::new(ThrustlerError::EngineError))
-                        .attach_printable("Vulkan init callback is not specified")?,
+                        .attach_printable("Initialization callback is not specified")?,
                 )
             }
         }
@@ -118,7 +132,8 @@ enum Window {
     Winit,
 }
 
-enum Backend {
+pub enum Backend {
     Vulkan,
+    Wgpu,
 }
 
