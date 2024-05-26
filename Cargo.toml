@@ -8,7 +8,9 @@ members = [
     "crates/vulkan",
     "crates/winit-window",
     "crates/engine",
-    "crates/core"]
+    "crates/core",
+    "crates/wgpu"
+]
 
 [dependencies]
 engine = { path = "../thrustler/crates/engine"}
@@ -16,6 +18,7 @@ engine = { path = "../thrustler/crates/engine"}
 [workspace.dependencies]
 core = { path = "../thrustler/crates/core"}
 vulkan = { path = "../thrustler/crates/vulkan" }
+wgpu = { path = "../thrustler/crates/wgpu" }
 winit-window = { path = "../thrustler/crates/winit-window" }
 error-stack = "0.4.1"
 uuid = { version = "1.8.0", features = ["v4"] }
