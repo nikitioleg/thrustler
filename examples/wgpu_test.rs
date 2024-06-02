@@ -1,4 +1,4 @@
-use engine::{Backend, Engine, EngineSettings, GameObject, Scene, ThrustlerError};
+use engine::{Backend, Engine, EngineSettings, GameObject, Scene, ThrustlerError, Vertex};
 
 fn main() -> engine::Result<(), ThrustlerError> {
     Ok(
@@ -9,7 +9,15 @@ fn main() -> engine::Result<(), ThrustlerError> {
                 ..EngineSettings::default()
             }
         )?
-            .add_scene(Test { game_objects: vec![] })
+            .add_scene(Test {
+                game_objects: vec![
+                    GameObject::new(vec![
+                        Vertex::new([-1.0, 1.0]),
+                        Vertex::new([0.0, -1.0]),
+                        Vertex::new([1.0, 1.0]),
+                    ])
+                ]
+            })
             .start()?,
     )
 }

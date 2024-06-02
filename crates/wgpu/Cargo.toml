@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies]
 core.workspace = true
 error-stack.workspace = true
+uuid.workspace = true
 raw-window-handle = "0.6.2"
 wgpu = "0.20.0"
 pollster = "0.3.0"
+bytemuck = { version = "1.16.0", features = ["derive"] }

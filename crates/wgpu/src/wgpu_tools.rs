@@ -1,10 +1,19 @@
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::num::Wrapping;
+use std::ops::Deref;
+use std::rc::Rc;
 use std::sync::Arc;
+use bytemuck::{Pod, Zeroable};
 use error_stack::ResultExt;
-use wgpu::{Adapter, Backends, BlendState, Color, ColorTargetState, ColorWrites, CommandBuffer, CommandEncoderDescriptor, CompositeAlphaMode, Device, Face, FragmentState, FrontFace, include_wgsl, Instance, LoadOp, MultisampleState, Operations, PipelineLayoutDescriptor, PolygonMode, PresentMode, PrimitiveState, PrimitiveTopology, Queue, RenderPass, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor, StoreOp, Surface, SurfaceConfiguration, SurfaceTexture, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, VertexState};
+use wgpu::{Adapter, Backends, BlendState, Buffer, BufferAddress, BufferSlice, BufferUsages, Color, ColorTargetState, ColorWrites, CommandBuffer, CommandEncoderDescriptor, CompositeAlphaMode, Device, DeviceDescriptor, Face, Features, FragmentState, FrontFace, include_wgsl, Instance, Limits, LoadOp, MultisampleState, Operations, PipelineLayoutDescriptor, PolygonMode, PresentMode, PrimitiveState, PrimitiveTopology, Queue, RenderPass, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor, StoreOp, Surface, SurfaceConfiguration, SurfaceTexture, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, VertexAttribute, VertexBufferLayout, VertexFormat, VertexState, VertexStepMode};
 use core::error::ThrustlerError;
 use error_stack::Result;
 use pollster::FutureExt;
+use uuid::Uuid;
+use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use core::Size;
+use core::game_objects::{GameObject, Vertex};
 use crate::WgpuWindow;
 
 pub(crate) fn create_surface(instance: &Instance, window: Arc<dyn WgpuWindow>) -> Result<Surface<'static>, ThrustlerError> {
@@ -25,14 +34,14 @@ pub(crate) fn create_adapter(instance: &Instance, surface: &Surface<'static>) ->
 
 pub(crate) fn pick_device_and_queue(adapter: &Adapter) -> Result<(Device, Queue), ThrustlerError> {
     adapter.request_device(
-        &wgpu::DeviceDescriptor {
-            required_features: wgpu::Features::empty(),
+        &DeviceDescriptor {
+            required_features: Features::empty(),
             // WebGL doesn't support all of wgpu's features, so if
             // we're building for the web, we'll have to disable some.
             required_limits: if cfg!(target_arch = "wasm32") {
-                wgpu::Limits::downlevel_webgl2_defaults()
+                Limits::downlevel_webgl2_defaults()
             } else {
-                wgpu::Limits::default()
+                Limits::default()
             },
             label: None,
         },
@@ -85,7 +94,7 @@ pub(crate) fn create_render_pipeline(device: &Device, config: &SurfaceConfigurat
         vertex: VertexState {
             module: &shader_module,
             entry_point: "vs_main",
-            buffers: &[],
+            buffers: &[create_vertex_layout()],
             compilation_options: Default::default(),
         },
         fragment: Some(FragmentState {
@@ -119,7 +128,22 @@ pub(crate) fn create_render_pipeline(device: &Device, config: &SurfaceConfigurat
     })
 }
 
+fn create_vertex_layout() -> VertexBufferLayout<'static> {
+    VertexBufferLayout {
+        array_stride: std::mem::size_of::<WgpuVertex>() as BufferAddress,
+        step_mode: VertexStepMode::Vertex,
+        attributes: &[
+            VertexAttribute {
+                offset: 0,
+                shader_location: 0,
+                format: VertexFormat::Float32x2,
+            }
+        ],
+    }
+}
+
 pub struct CommandBufferExecutor {
+    vertices_buffer_cache: RefCell<HashMap<Uuid, (Rc<Buffer>, bool)>>,
     surface: Surface<'static>,
     device: Device,
     queue: Queue,
@@ -129,6 +153,7 @@ pub struct CommandBufferExecutor {
 impl CommandBufferExecutor {
     pub fn new(surface: Surface<'static>, device: Device, queue: Queue, render_pipeline: RenderPipeline) -> Self {
         Self {
+            vertices_buffer_cache: RefCell::new(HashMap::new()),
             surface,
             device,
             queue,
@@ -136,12 +161,12 @@ impl CommandBufferExecutor {
         }
     }
 
-    pub fn execute_buffer(&self) {
-        //todo remove unwrap
-        let (current_texture, texture_view) = self.acquire_next_surface().unwrap();
-        let command_buffer = self.fill_render_pass(texture_view).unwrap();
+    pub fn execute_buffer(&mut self, game_objects: &Vec<GameObject>) -> Result<(), ThrustlerError> {
+        let (current_texture, texture_view) = self.acquire_next_surface()?;
+        let command_buffer = self.fill_render_pass(texture_view, game_objects);
         self.queue.submit(std::iter::once(command_buffer));
         current_texture.present();
+        Ok(())
     }
 
     fn acquire_next_surface(&self) -> Result<(SurfaceTexture, TextureView), ThrustlerError> {
@@ -153,7 +178,21 @@ impl CommandBufferExecutor {
         Ok((current_texture, texture_view))
     }
 
-    fn fill_render_pass(&self, texture_view: TextureView) -> Result<CommandBuffer, ThrustlerError> {
+    fn create_vertices_buffer(&self, game_object: &GameObject) -> Buffer {
+        let vertices = game_object.vertices.iter().map(|vertex| {
+            WgpuVertex { position: vertex.position }
+        }).collect::<Vec<WgpuVertex>>();
+
+        self.device.create_buffer_init(
+            &BufferInitDescriptor {
+                label: Some("Vertex Buffer"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: BufferUsages::VERTEX,
+            }
+        )
+    }
+
+    fn fill_render_pass(&mut self, texture_view: TextureView, game_objects: &Vec<GameObject>) -> CommandBuffer {
         let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("Thrustler encoder"),
         });
@@ -181,10 +220,65 @@ impl CommandBufferExecutor {
                     timestamp_writes: None,
                 }
             );
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.draw(0..3, 0..1);
-        };
 
-        Ok(encoder.finish())
+            {
+                render_pass.set_pipeline(&self.render_pipeline);
+            }
+
+            self.mark_buffers_as_unused();
+            for game_object in game_objects {
+                let vert = {
+                    let vertex_buffer = self.get_buffer_slice_for_game_object(game_object);
+                    unsafe { Rc::as_ptr(&vertex_buffer).as_ref().unwrap() }
+                };
+                render_pass.set_vertex_buffer(0, vert.slice(..));
+                render_pass.draw(0..3, 0..1);
+            }
+            self.delete_all_unused_buffers();
+        };
+        encoder.finish()
+    }
+
+    fn get_buffer_slice_for_game_object(&self, game_object: &GameObject) -> Rc<Buffer> {
+        let mut borrowed_cache = self.vertices_buffer_cache.borrow_mut();
+
+        if let Some(data) = borrowed_cache.get_mut(&game_object.id) {
+            data.1 = true;
+            data.0.clone()
+        } else {
+            let rc_buffer = Rc::new(self.create_vertices_buffer(game_object));
+            borrowed_cache.insert(game_object.id, (rc_buffer.clone(), true));
+            rc_buffer
+        }
+    }
+
+    fn mark_buffers_as_unused(&self) {
+        self.vertices_buffer_cache.borrow_mut().values_mut().for_each(|chunk| {
+            chunk.1 = false;
+        })
+    }
+
+    fn delete_all_unused_buffers(&self) {
+        let dead_buffer_uuids: Vec<_> = self.vertices_buffer_cache.borrow().iter().filter_map(|bucket| {
+            if !bucket.1.1 {
+                Some(*bucket.0)
+            } else {
+                None
+            }
+        }).collect();
+
+        for dead_buffer_uuid in dead_buffer_uuids {
+            self.vertices_buffer_cache.borrow_mut().remove(&dead_buffer_uuid);
+        }
     }
 }
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+struct WgpuVertex {
+    position: [f32; 2],
+}
+
+unsafe impl bytemuck::Zeroable for WgpuVertex {}
+
+unsafe impl bytemuck::Pod for WgpuVertex {}

@@ -8,7 +8,7 @@ use core::{Size, ThrustlerBackend};
 use core::error::ThrustlerError;
 use core::game_objects::Scene;
 
-use crate::wgpu_tools::{CommandBufferExecutor, create_adapter, create_render_pipeline, create_surface, create_surface_config, pick_device_and_queue};
+use wgpu_tools::*;
 
 mod wgpu_tools;
 
@@ -70,6 +70,6 @@ pub trait WgpuWindow: WindowHandle {}
 impl ThrustlerBackend for WgpuBackend {
     fn draw_scene(&mut self, scene: &Box<dyn Scene>) {
         let toolkit = self.get_toolkit();
-        toolkit.command_buffer_executor.execute_buffer();
+        toolkit.command_buffer_executor.execute_buffer(scene.get_scene_objects());
     }
 }

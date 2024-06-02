@@ -1,4 +1,4 @@
-use engine::{Engine, EngineSettings, Scene};
+use engine::{Backend, Engine, EngineSettings, Scene};
 use engine::{GameObject, Vertex};
 use engine::Result;
 use engine::ThrustlerError;
@@ -8,6 +8,7 @@ fn main() -> Result<(), ThrustlerError> {
         Engine::new_with_settings(
             EngineSettings {
                 frames_per_second: 1,
+                backend: Backend::Wgpu,
                 ..EngineSettings::default()
             }
         )?
